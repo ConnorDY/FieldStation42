@@ -219,9 +219,11 @@ class ScheduleFrame(tk.Frame):
             row = view["rows"][r]
             meta = view["meta"][r]
 
+            channel_name = ' '.join(meta['network_name'].split('-')).title()
+
             channel_label = tk.Label(
                 self.scroll_frame,
-                text=f"{meta['network_name']}\n{meta['channel_number']}",
+                text=f"{channel_name}\n[{meta['channel_number']}]",
                 bg=self.conf.bottom_bg,
                 fg=self.conf.schedule_highlight_fg,
                 font=self.conf._network_font,
