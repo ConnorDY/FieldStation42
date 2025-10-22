@@ -194,7 +194,7 @@
                     <div class="station-row">
                         <div class="station-name">
                             <div class="channel-number">${channelNumber}</div>
-                            <div class="network-name">${station.network_name}</div>
+                            <div class="network-name">${station.network_name.split('-').map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</div>
                         </div>
                     </div>
                 `;
