@@ -21,7 +21,7 @@
         let guideEndTime = new Date();
         let scrollInterval = null;
         let verticalScrollInterval = null;
-        const autoScrollEnabled = true;
+        let autoScrollEnabled = true; // Will be initialized from localStorage
         let virtualScrollPosition = 0;
         const TIME_SLOT_WIDTH = 120; // pixels per 30-minute slot
         const SCROLL_SPEED = 0.033; // pixels per second (1 pixel per 30 seconds = slow realistic scroll)
@@ -51,6 +51,10 @@
         }
         
         document.addEventListener('DOMContentLoaded', async function () {
+            // Initialize auto-scroll setting from localStorage
+            const savedSetting = localStorage.getItem('fs42-autoscroll');
+            autoScrollEnabled = savedSetting !== 'false'; // Default to true if not set
+
             const content = `
                 <div class="guide-container">
                     <div class="guide-timeline" id="timeline"></div>
@@ -101,20 +105,21 @@
             
             guideEndTime = new Date(guideStartTime.getTime() + (2 * 60 * 60 * 1000)); // 2 hours total
             
-            // Load stations
+            // Load all stations
             const allStations = await window.fs42Common.fetchStationSummary();
-            
-            // Filter stations to only show those with schedule data
-            stations = allStations.filter(station => {
-                const hasSchedule = station.schedule_summary && 
-                                  station.schedule_summary.start !== 0 && 
-                                  station.schedule_summary.end !== 0;
-                return hasSchedule;
+
+            // Filter out hidden stations
+            stations = allStations.filter(station => !station.hidden);
+
+            // Mark stations with/without schedules
+            stations.forEach(station => {
+                station.has_schedule = station.schedule_summary &&
+                                      station.schedule_summary.start !== 0 &&
+                                      station.schedule_summary.end !== 0;
             });
-            
+
             if (stations.length === 0) {
-                const totalStations = allStations.length;
-                document.getElementById('guide-grid').innerHTML = `<p>No stations with programming schedules found. (${totalStations} total stations, but none have programming data)</p>`;
+                document.getElementById('guide-grid').innerHTML = `<p>No stations found.</p>`;
                 return;
             }
             
@@ -190,6 +195,7 @@
             // Add actual stations
             for (const station of stations) {
                 const channelNumber = station.channel_number || '?';
+                const displayName = station.network_long_name || station.network_name;
                 stationsHTML += `
                     <div class="station-row">
                         <div class="station-name">
@@ -224,7 +230,21 @@
                 const station = stations[stationIndex];
                 const stationRow = document.createElement('div');
                 stationRow.className = 'guide-row';
-                
+
+                // Check if station has schedule
+                if (!station.has_schedule) {
+                    // No schedule - show single bar with network name
+                    const noScheduleBlock = document.createElement('div');
+                    noScheduleBlock.className = 'program-block no-schedule';
+                    noScheduleBlock.style.left = '0px';
+                    noScheduleBlock.style.width = '100%';
+                    const displayName = station.network_long_name || station.network_name;
+                    noScheduleBlock.innerHTML = `<span class="program-title">${displayName}</span>`;
+                    stationRow.appendChild(noScheduleBlock);
+                    grid.appendChild(stationRow);
+                    continue;
+                }
+
                 try {
                     // Fetch a wider time range to include shows that started before our guide window
                     // but might still be airing during our guide time
@@ -234,7 +254,7 @@
                         formatDateForAPI(extendedStartTime),
                         formatDateForAPI(guideEndTime)
                     );
-                    
+
                     if (scheduleBlocks && scheduleBlocks.length > 0) {
                         for (const block of scheduleBlocks) {
                             const blockElement = createProgramBlock(block);
@@ -261,7 +281,7 @@
                     errorBlock.innerHTML = '<span class="program-title">Error loading schedule</span>';
                     stationRow.appendChild(errorBlock);
                 }
-                
+
                 grid.appendChild(stationRow);
             }
             
@@ -394,17 +414,20 @@
             if (verticalScrollInterval) {
                 clearInterval(verticalScrollInterval);
             }
-            
+
             verticalScrollInterval = setInterval(() => {
                 if (autoScrollEnabled) {
                     const stationsColumn = document.getElementById('stations-column');
                     const guideGridContainer = document.querySelector('.guide-grid-container');
-                    
+
                     if (stationsColumn && guideGridContainer) {
                         const maxScroll = stationsColumn.scrollHeight - stationsColumn.clientHeight;
-                        
-                        // Only scroll if there's content to scroll through
-                        if (maxScroll > 0) {
+                        const containerHeight = window.innerHeight - 40;
+                        const stationsHeight = stations.length * 60;
+
+                        // Only scroll if there are enough stations to warrant scrolling
+                        // (stations must fill more than the visible container height)
+                        if (maxScroll > 0 && stationsHeight > containerHeight) {
                             // Get current scroll position
                             const currentScroll = stationsColumn.scrollTop;
                             let nextScroll = currentScroll + VERTICAL_SCROLL_SPEED;

@@ -4,6 +4,7 @@ import argparse
 import time
 import datetime
 import json
+import shelve
 import signal
 import logging
 
@@ -22,18 +23,20 @@ from fs42.reception import (
     short_change_effect,
     none_change_effect,
 )
+from fs42.live_schedule_agent import LiveScheduleAgent
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s:%(name)s:%(message)s", level=logging.INFO
 )
+
 
 try:
     from fs42.overlay.ticker import run_ticker
 except ModuleNotFoundError:
     logging.getLogger("FieldPlayer").warning("Error importing ticker - using the ticker will cause an error.")
 
+STATE_SHELVE = "runtime/player_state.bin"
 api_commands_queue: multiprocessing.Queue = None
-
 
 def input_check():
     if api_commands_queue:
@@ -53,15 +56,28 @@ def input_check():
                 case "reload_data":
                     LiquidManager().reload_schedules()
                 case "guide":
-                    c_number = StationManager().guide_config["channel_number"]
-                    change_request = {"command": "direct", "channel": c_number}
-                    return PlayerOutcome(PlayerState.CHANNEL_CHANGE, json.dumps(change_request))
+                    try:
+                        c_number = StationManager().guide_config["channel_number"]
+                        change_request = {"command": "direct", "channel": c_number}
+                        return PlayerOutcome(PlayerState.CHANNEL_CHANGE, json.dumps(change_request))
+                    except TypeError:
+                        logging.getLogger("InputCheck").warning("Guide channel not configured")
                 case "ticker":
                     message = q_message.get("message", None)
                     header = q_message.get("header", None)
                     style = q_message.get("style", None)
                     iterations = q_message.get("iterations", None)
                     run_ticker(message, header, style, iterations)
+                case "play_file":
+                    file_path = q_message.get("file_path", None)
+                    return PlayerOutcome(PlayerState.PLAY_FILE, file_path)
+                case "web_key":
+                    key = q_message.get("key", "")
+                    return PlayerOutcome(PlayerState.SUCCESS, f"web_key:{key}")
+                case "mpv_command":
+                    action = q_message.get("action", "")
+                    return PlayerOutcome(PlayerState.SUCCESS, f"mpv_command:{action}")
+
 
     channel_socket = StationManager().server_conf["channel_socket"]
     with open(channel_socket, "r") as r_sock:
@@ -73,11 +89,22 @@ def input_check():
     return None
 
 
-def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
+
+
+def main_loop(transition_fn, shutdown_queue=None, api_proc=None, schedule_lock=None):
     manager = StationManager()
     reception = ReceptionStatus()
     logger = logging.getLogger("MainLoop")
     logger.info("Starting main loop")
+
+    # set up the live schedule agent if configured
+    schedule_agent = None
+    agent_conf = manager.server_conf.get("schedule_agent")
+    if agent_conf and schedule_lock:
+        schedule_agent = LiveScheduleAgent(agent_conf, schedule_lock)
+        logger.info("Live schedule agent is active")
+    else:
+        logger.info("Live schedule agent is not configured")
 
     channel_socket = StationManager().server_conf["channel_socket"]
 
@@ -85,7 +112,6 @@ def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
     with open(channel_socket, "w"):
         pass
 
-    channel_index = 0
     if not len(manager.stations):
         logger.error(
             "Could not find any station runtimes - do you have your channels configured?"
@@ -98,11 +124,36 @@ def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
         )
         return
 
+    channel_index = 0
+    # if they specified a start channel, just use that
+    start_channel_config = StationManager().server_conf.get("start_channel", None)
+    if not start_channel_config:
+        use_saved = StationManager().server_conf.get("recall_last_channel", True)
+        if use_saved:
+            with shelve.open(STATE_SHELVE) as s:
+                channel_index = s.get("channel_index", 0)
+    else:
+        channel_index = manager.index_from_channel(start_channel_config)
+        if not channel_index:
+            logger.error(f"Start channel specified as {start_channel_config} in main_config.json, but station doesn't exist.")
+            logger.warning(f"Attempting fallback to the first channel")
+            channel_index = 0
+
+    if channel_index >= len(manager.stations):
+        logger.warning("Saved channel index %d is out of range, resetting to 0", channel_index)
+        channel_index = 0
+
     player = StationPlayer(manager.stations[channel_index], input_check)
+    if schedule_lock:
+        player.schedule_lock = schedule_lock
+    stand_by = StationManager().server_conf.get("standby_image", "runtime/standby.png")
     reception.degrade()
     player.update_filters()
+    player.play_file(stand_by)
 
-    def sigint_handler(sig, frame):
+    player.load_up()
+
+    def signal_handler(sig, frame):
         logger.critical("Received sig-int signal, attempting to exit gracefully...")
         player.shutdown()
 
@@ -115,7 +166,8 @@ def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
         logger.info("Shutdown completed as expected - exiting application")
         exit(0)
 
-    signal.signal(signal.SIGINT, sigint_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     channel_conf = manager.stations[channel_index]
 
@@ -125,6 +177,9 @@ def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
     stuck_timer = 0
 
     while True:
+        if schedule_agent:
+            schedule_agent.tick()
+
         logger.info(f"Playing station: {channel_conf['network_name']}")
 
         if channel_conf["network_type"] == "guide" and not skip_play:
@@ -180,6 +235,7 @@ def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
                                     )
                                 else:
                                     channel_index = new_index
+
                             else:
                                 logger.critical(
                                     "Got direct tune command, but no channel specified"
@@ -193,11 +249,12 @@ def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
                             found = False
                             while not found:
                                 channel_index -= 1
-                                # channel_index = channel_index if channel_index >= 0 else len(manager.stations)-1
+                                
                                 if channel_index < 0:
                                     channel_index = stations_len-1
                                 if not station_cache[channel_index]["hidden"]:
                                     found = True
+
 
                 except Exception as e:
                     logger.exception(e)
@@ -213,19 +270,27 @@ def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
                     channel_index = channel_index if channel_index < stations_len else 0
                     found = not station_cache[channel_index]["hidden"]
 
-
+            # save the player state
+            with shelve.open(STATE_SHELVE) as s:
+                s["channel_index"] = channel_index
             channel_conf = station_cache[channel_index]
             player.station_config = channel_conf
 
             # long_change_effect(player, reception)
             transition_fn(player, reception)
 
+        elif player_state.status == PlayerState.PLAY_FILE:
+            print("Got playfile!", player_state.payload )
+            skip_play = True
+            player_state = player.play_and_wait(player_state.payload)
+
         elif player_state.status == PlayerState.FAILED:
             stuck_timer += 1
 
             # only put it up once after 2 seconds of being stuck
-            if stuck_timer == 2 and "standby_image" in channel_conf:
-                player.play_file(channel_conf["standby_image"])
+            if stuck_timer == 2:
+                stand_by = channel_conf.get("standby_image", StationManager().server_conf.get("standby_image", "runtime/standby.png"))
+                player.play_file(stand_by)
             current_title_on_stuck = player.get_current_path()
             update_status_socket(
                 "stuck",
@@ -249,7 +314,7 @@ def main_loop(transition_fn, shutdown_queue=None, api_proc=None):
         elif player_state.status == PlayerState.SUCCESS:
             stuck_timer = 0
         elif player_state.status == PlayerState.EXIT_COMMAND:
-            sigint_handler(None, None)
+            signal_handler(None, None)
         else:
             stuck_timer = 0
 
@@ -322,8 +387,10 @@ if __name__ == "__main__":
         api_commands_queue = None
         api_proc = None
 
+    schedule_lock = multiprocessing.Lock()
+
     try:
-        main_loop(trans_fn, shutdown_queue=shutdown_queue, api_proc=api_proc)
+        main_loop(trans_fn, shutdown_queue=shutdown_queue, api_proc=api_proc, schedule_lock=schedule_lock)
     finally:
         if shutdown_queue is not None:
             shutdown_queue.put("shutdown")

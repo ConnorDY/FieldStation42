@@ -14,7 +14,7 @@ class NoFillerContentFound(Exception):
 
 class CatalogEntry:
     # CatalogEntry(row[2], row[3], float(row[4]), json.loads(row[6]) if row[6] else [])
-    def __init__(self, path, duration, tag, hints=[], count=0):
+    def __init__(self, path, duration, tag, hints=[], count=0, content_type="feature", media_type="video"):
         self.path = path
         self.realpath = None
         # get the show name from the path
@@ -23,10 +23,13 @@ class CatalogEntry:
         self.tag = tag
         self.count = count
         self.hints = hints
+        self.content_type = content_type
+        self.media_type = media_type
         self.station = None
         self.dbid = None
         self.created_at = None
         self.updated_at = None
+        self.meta_cache = None
 
     def __str__(self):
         hints = list(map(str, self.hints))
@@ -41,6 +44,8 @@ class CatalogEntry:
             "duration": self.duration,
             "tag": self.tag,
             "count": self.count,
+            "content_type": self.content_type,
+            "media_type": self.media_type,
             "hints": [hint.toJSON() for hint in self.hints],  # Convert each hint to JSON
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -50,7 +55,7 @@ class CatalogEntry:
     def from_json_dict(json_data):
         # Create an entry from a JSON serializable dictionary
         tup = (
-            json_data["dbid"], 
+            json_data["dbid"],
             json_data["station"],
             json_data["path"],
             json_data["title"],
@@ -60,20 +65,32 @@ class CatalogEntry:
             json_data["hints"],
             json_data.get("created_at", None),
             json_data.get("updated_at", None),
+            json_data.get("realpath", None),
+            json_data.get("content_type", "feature"),
+            json_data.get("media_type", "video"),
         )
         return CatalogEntry.from_db_row(tup)
 
     @staticmethod
     def from_db_row(row):
-        
-        if len(row) == 11:  # New schema with realpath
+
+        if len(row) == 13:  # New schema with realpath, content_type, and media_type
+            (dbid, station, path, title, duration, tag, count, hints_str, created, updated, realpath, content_type, media_type) = row
+        elif len(row) == 12:  # Schema with realpath and content_type but no media_type
+            (dbid, station, path, title, duration, tag, count, hints_str, created, updated, realpath, content_type) = row
+            media_type = "video"  # Default for backward compatibility
+        elif len(row) == 11:  # Schema with realpath but no content_type or media_type
             (dbid, station, path, title, duration, tag, count, hints_str, created, updated, realpath) = row
+            content_type = "feature"  # Default for backward compatibility
+            media_type = "video"  # Default for backward compatibility
         else:  # Old schema without realpath
             (dbid, station, path, title, duration, tag, count, hints_str, created, updated) = row
             realpath = None
+            content_type = "feature"  # Default for backward compatibility
+            media_type = "video"  # Default for backward compatibility
 
 
-        entry = CatalogEntry(path, duration, tag, None)
+        entry = CatalogEntry(path, duration, tag, None, count, content_type, media_type)
         entry.realpath = realpath
         entry.count = count
         entry.dbid = dbid
@@ -102,9 +119,11 @@ class CatalogEntry:
                         elif hint["type"] == "range":
                             hints.append(schedule_hint.RangeHint(hint["range_string"]))
                         elif hint["type"] == "quarter":
-                            hints.append(schedule_hint.QuarterHint(hint["range_string"]))
+                            hints.append(schedule_hint.QuarterHint(hint["quarter"]))
                         elif hint["type"] == "month":
                             hints.append(schedule_hint.MonthHint(hint["month"]))
+                        elif hint["type"] == "day_of_week":
+                            hints.append(schedule_hint.DayofWeekHint(hint["day"]))
                         else:
                             print(f"Warning: Unknown hint type {hint['type']}. Skipping.")
                     else:

@@ -15,7 +15,10 @@ async def get_summary():
             sched_summary = {"network_name": station["network_name"], "start": 0, "end": 0}
         summary = {
             "network_name": station["network_name"],
+            "network_long_name": station.get("network_long_name", ""),
             "channel_number": station["channel_number"],
+            "_has_schedule": station["_has_schedule"],
+            "hidden": station.get("hidden", False),
             "catalog_summary": CatalogAPI.get_summary(station),
             "schedule_summary": sched_summary,
         }

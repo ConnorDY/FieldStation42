@@ -4,7 +4,7 @@ from pathlib import Path
 
 class TitleParser:
     @staticmethod
-    def parse_title(in_str: str) -> str:
+    def parse_title(in_str: str, custom_patterns: list = None) -> str:
         if not in_str:
             return ""  # Consider defaulting to No Information or No Data to match TV Guides
 
@@ -16,14 +16,17 @@ class TitleParser:
         # Define separator pattern - spaces, dots, underscores, dashes
         sep = r"[\s._-]+"
 
-        patterns = [
+        # Default built-in patterns
+        default_patterns = [
+            # Title + separators + "Title" + number suffix (e.g., "Show Name - Title1", "Show Name TITLE2")
+            (r"^(.+?)" + sep + r"[tT][iI][tT][lL][eE]\d+$", 1),
             # [Group] Title - Episode (release group prefix)
             (r"^\[.+?\]" + sep + r"(.+?)" + sep + r"\d+.*$", 1),
             # Title (including sequels) + year in parentheses - strip the year
             (r"^(.+?)\s*\(\d{4}\)$", 1),
             # Title + separators + season/episode pattern + optional extra (including duplicate episodes like s01e03e03)
             (r"^(.+?)" + sep + r"(?:[sS]\d+(?:" + sep + r"?[eE]\d+)+|[sS]\d+[eE]\d+(?:[eE]\d+)*|\d+[xX]\d+)(?:" + sep + r".*)?$", 1),
-            # Title (Year) + seperators + season/episode pattern + seperators + episode name + seperators + extras
+            # Title (Year) + separators + season/episode pattern + separators + episode name + separators + extras
             (
                 r"^(.+?)(?:\s\(\d{4}\))"
                 + sep
@@ -43,6 +46,12 @@ class TitleParser:
             # Just title (fallback)
             (r"^(.+)$", 1),
         ]
+
+        # Prepend custom patterns so they are tried first (higher priority)
+        if custom_patterns:
+            patterns = custom_patterns + default_patterns
+        else:
+            patterns = default_patterns
 
         for pattern, group in patterns:
             match = re.match(pattern, filename)

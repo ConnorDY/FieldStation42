@@ -5,12 +5,13 @@ import datetime
 
 sys.path.append(os.getcwd())
 from fs42.station_manager import StationManager
-from fs42.liquid_manager import LiquidManager, ScheduleNotFound
+from fs42.liquid_manager import LiquidManager, ScheduleNotFound, ScheduleQueryNotInBounds
 from fs42.liquid_blocks import LiquidBlock
 from fs42.title_parser import TitleParser
 
 def normalize_video_title(title):
-    return TitleParser.parse_title(title)
+    custom_patterns = StationManager().server_conf.get("title_patterns", [])
+    return TitleParser.parse_title(title, custom_patterns)
 
 
 class PreviewBlock:
@@ -96,15 +97,19 @@ class GuideBuilder:
 
         # each statio is a row
         for station in StationManager().stations:
-            if station["hidden"] or not station["_has_schedule"]:
+            if station["hidden"]:
                 continue
-
-            try:
-                entries = ScheduleQuery.query_slot(station["network_name"], start_time, normalize)
-            except ScheduleNotFound:
-                # Create a single block that spans the entire 1.5 hour viewing window (5400 seconds)
-                placeholder = PreviewBlock("Schedule Not Found", width=5400)
+            elif not station["_has_schedule"]:
+                to_display = station.get("network_long_name", station["network_name"])
+                placeholder = PreviewBlock(to_display, width=5400)
                 entries = [placeholder]
+            else:
+                try:
+                    entries = ScheduleQuery.query_slot(station["network_name"], start_time, normalize)
+                except Exception:
+                    # Create a single block that spans the entire 1.5 hour viewing window (5400 seconds)
+                    placeholder = PreviewBlock("No programming data available", width=5400)
+                    entries = [placeholder]
 
             view["rows"].append(entries)
             network_name = station["network_name"]
@@ -129,9 +134,9 @@ class GuideBuilder:
             timings.append(f"{hour_two}:00")
 
         formatted_timings = []
-        # TODO: Add configuration option for 24 vs 12 hour times
+        time_format = StationManager().server_conf["time_format"]
         for timing in timings:
-            formatted = datetime.datetime.strptime(timing, "%H:%M").strftime("%I:%M %p")
+            formatted = datetime.datetime.strptime(timing, "%H:%M").strftime(time_format)
             formatted_timings.append(formatted)
 
         view["timings"] = formatted_timings

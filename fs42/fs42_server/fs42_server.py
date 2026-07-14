@@ -33,7 +33,7 @@ async def _lifespan(app):
         asyncio.get_event_loop().create_task(shutdown_monitor())
     yield
 
-# Create FastAPI app with lifespan instead of the deprecated add_event_handler API
+# Create FastAPI app
 fapi = FastAPI(title="FieldStation42 API", lifespan=_lifespan)
 
 @fapi.get("/")
@@ -48,6 +48,7 @@ async def remote():
 async def favicon():
     return FileResponse("fs42/fs42_server/static/favicon.ico")
 
+# Include routers from the api package
 for router in routers:
     fapi.include_router(router)
 

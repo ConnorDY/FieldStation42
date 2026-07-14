@@ -1,5 +1,6 @@
 import json
 import sys
+from collections import defaultdict
 from pathlib import Path
 import glfw
 from pydantic import BaseModel
@@ -64,6 +65,7 @@ class StatusDisplay(object):
         )
 
         self.time_since_change = 0
+        self.last_status = None  # Track the last status to detect changes
 
         self.check_status()
 
@@ -76,8 +78,13 @@ class StatusDisplay(object):
                 print(f"Unable to parse player status, {status}")
 
             else:
-                new_string = self.config.format_text.format(**status)
-                if new_string != self._text.string:
+                # Check if status field changed (e.g., from "stopped" to "playing")
+                status_changed = self.last_status is None or status.get("status") != self.last_status.get("status")
+                self.last_status = status
+
+                new_string = self.config.format_text.format_map(defaultdict(str, status))
+                # Reset timer if text changed OR if status changed (like stopped->playing)
+                if new_string != self._text.string or status_changed:
                     self.time_since_change = -self.config.delay
                     if new_string:
                         self._text.string = new_string

@@ -3,7 +3,6 @@
     "network_name": "Streamy",
     "network_type": "streaming",
     "channel_number": 1,
-    "runtime_dir": "runtime/steamy",
     "network_long_name": "My Streamy Channel",
     "streams": [
       {
