@@ -25,8 +25,15 @@ class WebRender(QMainWindow):
 
         self.setCentralWidget(self.browser)
 
-        # Hide cursor
+        # Hide cursor. Setting this on the QMainWindow alone isn't enough -
+        # QWebEngineView renders via its own Chromium compositor surface and
+        # doesn't reliably inherit the parent widget's cursor, so it has to
+        # be set explicitly on the browser widget too (see also the
+        # QApplication-level override cursor set in WebRenderApp, which is
+        # the belt-and-suspenders fix for the brief native-cursor flash seen
+        # right when the fullscreen window is first mapped).
         self.setCursor(Qt.BlankCursor)
+        self.browser.setCursor(Qt.BlankCursor)
 
         # Retry logic for handling web server startup races
         self.current_url = None
@@ -95,6 +102,14 @@ class WebRenderApp(QApplication):
     def __init__(self, user_conf, queue=None):
         super().__init__([])
 
+        # Belt-and-suspenders cursor hiding: an application-wide override
+        # cursor takes effect immediately (before any window is even shown)
+        # and applies regardless of widget hierarchy, which covers the brief
+        # moment right as the fullscreen window is first mapped - before
+        # WebRender's own per-widget setCursor(BlankCursor) calls would
+        # otherwise be the only thing hiding it.
+        self.setOverrideCursor(Qt.BlankCursor)
+
         self.queue = queue
 
         self.window = WebRender()
@@ -157,6 +172,7 @@ class WebRenderApp(QApplication):
                     self.refresh_timer.stop()
                 print("Closing window...")
                 self.window.close()
+                self.restoreOverrideCursor()
                 print("Quitting application...")
                 self.quit()
                 print("WebRender shutdown complete")
