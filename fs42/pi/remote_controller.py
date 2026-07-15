@@ -750,13 +750,18 @@ Environment variables:
             # Bluetooth disconnect / USB unplug / device vanished
             if e.errno == 19 or e.errno == 2:
                 print("Input device disconnected. Waiting for reconnection...")
-                time.sleep(5)
             else:
                 print(f"Device error: {e}")
-                time.sleep(5)
+            # Reset device_path so the top of the loop re-scans for the
+            # device instead of retrying this same (now stale) path forever -
+            # Flirc/USB re-enumeration often lands on a different
+            # /dev/input/eventN after a real reconnect.
+            device_path = None
+            time.sleep(5)
 
         except FileNotFoundError:
             print("Input device missing. Waiting for reconnection...")
+            device_path = None
             time.sleep(5)
 
         except PermissionError:
