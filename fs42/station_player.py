@@ -86,6 +86,8 @@ class StationPlayer:
         "toggle_subtitles": ("cycle", "sub-visibility"),
         "cycle_subtitles": ("cycle", "sub"),
         "cycle_audio": ("cycle", "audio"),
+        "seek_forward": ("seek", 15),
+        "seek_backward": ("seek", -15),
     }
 
     scramble_effects = {

@@ -10,6 +10,12 @@ import time
 import json
 import argparse
 
+# fs42 imports (this module is always launched with cwd == the FieldStation42
+# project root - see cablesim.sh's start_component - so appending cwd to
+# sys.path here mirrors what fs42_server.py does for the same reason).
+sys.path.append(os.getcwd())
+from fs42.station_manager import StationManager  # noqa: E402
+
 
 # ======================================
 # CONFIGURATION - CUSTOMIZE YOUR MAPPINGS
@@ -50,6 +56,17 @@ KEY_MAPPINGS = {
     'cycle_audio': 'a',           # Cycle audio tracks in mpv
     'power_stop': 'end',         # Stop player (power button)
     'exit': 'esc',               # Exit remote controller
+
+    # PPV (web/movie-library channel) playback seeking - only has an effect
+    # while the currently-tuned channel is configured with
+    # "network_type": "web" AND a movie is actively playing (once playing,
+    # it's handled by the normal mpv player, same as toggle_subtitles/
+    # cycle_subtitles/cycle_audio above). These are the dedicated left/right
+    # arrow buttons around the remote's OK button - distinct physical
+    # buttons from the main volume_up/volume_down 'right'/'left' mapping
+    # above, so normal volume control is never affected.
+    'ppv_seek_forward': 'insert',   # Seek forward while a PPV movie is playing
+    'ppv_seek_backward': 'delete',  # Seek backward while a PPV movie is playing
 
     # Alternative mappings (uncomment to use):
     # 'power_stop': 'space',     # Use spacebar for power/stop
@@ -117,6 +134,33 @@ def should_allow_press(function_name, debounce_time=DEBOUNCE_TIME):
             return True
         else:
             return False
+
+
+def get_current_channel():
+    """Return the current channel number, querying /player/status if we
+    don't already have it cached (e.g. right after the remote starts)."""
+    global current_channel
+    if current_channel is not None:
+        return current_channel
+    try:
+        response = requests.get(f'{FS42_BASE_URL}/player/status', timeout=2)
+        if response.ok:
+            current_channel = response.json().get('channel_number')
+    except Exception as e:
+        print(f"Failed to query current channel: {e}")
+    return current_channel
+
+
+def is_ppv_channel(channel_number):
+    """Return True if channel_number is configured as a PPV/web channel."""
+    if channel_number is None:
+        return False
+    try:
+        station = StationManager().station_by_channel(channel_number)
+        return bool(station) and station.get("network_type") == "web"
+    except Exception as e:
+        print(f"Failed to check channel type: {e}")
+        return False
 
 
 def send_channel_change():
@@ -238,6 +282,48 @@ def mute_pressed():
             print("Mute toggle failed")
     except Exception as e:
         print(f"Mute error: {e}")
+
+
+def ppv_seek_forward_pressed():
+    """Handle the dedicated PPV 'seek forward' button (right of OK). Only
+    meaningful while the current channel is a PPV/web channel; does nothing
+    otherwise (never affects normal volume control)."""
+    if not should_allow_press('ppv_seek_forward'):
+        return  # Debounced - ignore this press
+
+    if not is_ppv_channel(get_current_channel()):
+        print("PPV seek forward pressed but current channel is not a PPV channel - ignoring")
+        return
+
+    try:
+        response = requests.get(f'{FS42_BASE_URL}/player/mpv/seek-forward')
+        if response.ok:
+            print("Seeked forward")
+        else:
+            print("Seek forward failed")
+    except Exception as e:
+        print(f"Seek forward error: {e}")
+
+
+def ppv_seek_backward_pressed():
+    """Handle the dedicated PPV 'seek backward' button (left of OK). Only
+    meaningful while the current channel is a PPV/web channel; does nothing
+    otherwise (never affects normal volume control)."""
+    if not should_allow_press('ppv_seek_backward'):
+        return  # Debounced - ignore this press
+
+    if not is_ppv_channel(get_current_channel()):
+        print("PPV seek backward pressed but current channel is not a PPV channel - ignoring")
+        return
+
+    try:
+        response = requests.get(f'{FS42_BASE_URL}/player/mpv/seek-backward')
+        if response.ok:
+            print("Seeked backward")
+        else:
+            print("Seek backward failed")
+    except Exception as e:
+        print(f"Seek backward error: {e}")
 
 
 def channel_up_pressed():
@@ -556,6 +642,10 @@ def handle_key_name(key_name):
                 volume_down_pressed()
             elif function_name == 'mute':
                 mute_pressed()
+            elif function_name == 'ppv_seek_forward':
+                ppv_seek_forward_pressed()
+            elif function_name == 'ppv_seek_backward':
+                ppv_seek_backward_pressed()
             elif function_name == 'toggle_subtitles':
                 mpv_command_pressed('toggle_subtitles')
             elif function_name == 'cycle_subtitles':

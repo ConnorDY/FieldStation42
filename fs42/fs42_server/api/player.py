@@ -256,6 +256,20 @@ async def mpv_cycle_audio(request: Request):
     return await _queue_mpv_command(request, "cycle_audio")
 
 
+@router.get("/mpv/seek-forward")
+@router.post("/mpv/seek-forward")
+async def mpv_seek_forward(request: Request):
+    """Seek forward a fixed number of seconds in the active mpv player."""
+    return await _queue_mpv_command(request, "seek_forward")
+
+
+@router.get("/mpv/seek-backward")
+@router.post("/mpv/seek-backward")
+async def mpv_seek_backward(request: Request):
+    """Seek backward a fixed number of seconds in the active mpv player."""
+    return await _queue_mpv_command(request, "seek_backward")
+
+
 @router.post("/ticker")
 async def show_ticker(request: Request):
     data = await request.json()
