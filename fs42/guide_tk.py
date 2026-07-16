@@ -268,7 +268,7 @@ class ScheduleFrame(tk.Frame):
             row = view["rows"][r]
             meta = view["meta"][r]
 
-            channel_name = ' '.join(meta['network_name'].split('-')).title()
+            channel_name = meta.get('network_display_name') or ' '.join(meta['network_name'].split('-')).title()
 
             channel_label = tk.Label(
                 self.scroll_frame,

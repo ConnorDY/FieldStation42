@@ -114,7 +114,12 @@ class GuideBuilder:
             view["rows"].append(entries)
             network_name = station["network_name"]
             channel_number = station["channel_number"]
-            view["meta"].append({"network_name": network_name, "channel_number": channel_number})
+            network_display_name = station.get("network_display_name", "")
+            view["meta"].append({
+                "network_name": network_name,
+                "network_display_name": network_display_name,
+                "channel_number": channel_number,
+            })
 
         timings = []
         hour_one = hour
