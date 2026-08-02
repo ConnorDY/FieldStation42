@@ -8,7 +8,10 @@ from fs42.station_manager import StationManager
 
 router = APIRouter(prefix="/player", tags=["player"])
 
+VOLUME_SOCKET = "runtime/volume.socket"
 
+# Percentage the volume changes by on each volume up/down request.
+VOLUME_STEP = 2
 
 @router.get("/info")
 async def get_info():
@@ -286,14 +289,14 @@ async def show_ticker(request: Request):
 @router.get("/volume/up")
 @router.post("/volume/up")
 async def volume_up():
-    """Increase volume by 5%"""
+    """Increase volume by VOLUME_STEP percent"""
     return await _control_volume("up")
 
 
 @router.get("/volume/down")
 @router.post("/volume/down")
 async def volume_down():
-    """Decrease volume by 5%"""
+    """Decrease volume by VOLUME_STEP percent"""
     return await _control_volume("down")
 
 
@@ -314,26 +317,35 @@ async def _control_volume(action: str):
     
     # Try different audio systems in order of preference
     # For WSL, prefer PulseAudio over ALSA since ALSA usually fails
+
+    response = None
+
     if pactl_available:
         try:
-            return await _volume_pulseaudio(action)
+            response = await _volume_pulseaudio(action)
         except Exception as e:
             print(f"pactl failed: {e}")
             
     if amixer_available:
         try:
-            return await _volume_amixer(action)
+            response = await _volume_amixer(action)
         except Exception as e:
             print(f"amixer failed (expected in WSL): {e}")
             
     if wpctl_available:
         try:
-            return await _volume_wireplumber(action)
+            response = await _volume_wireplumber(action)
         except Exception as e:
             print(f"wpctl failed: {e}")
-    
-    raise HTTPException(status_code=500, detail=f"No supported audio system found or all failed. Available: amixer={amixer_available}, pactl={pactl_available}, wpctl={wpctl_available}")
 
+    if not response:
+        raise HTTPException(status_code=500, detail=f"No supported audio system found or all failed. Available: amixer={amixer_available}, pactl={pactl_available}, wpctl={wpctl_available}")
+
+    as_str = json.dumps(response)
+    with open(VOLUME_SOCKET, "w") as fp:
+        fp.write(as_str)
+
+    return response
 
 async def _volume_amixer(action: str):
     """Control volume using ALSA amixer (most common on Raspberry Pi)"""
@@ -352,16 +364,16 @@ async def _volume_amixer(action: str):
             # Cap at 100%
             if current_vol >= 100:
                 return {"action": action, "method": "amixer", "status": "capped", "message": "Volume already at maximum (100%)", "volume": "100%"}
-            elif current_vol > 95:
+            elif current_vol > 100 - VOLUME_STEP:
                 # Set to exactly 100% if we're close
                 cmd = ["amixer", "sset", mixer, "100%"]
                 message = "Volume set to maximum (100%)"
             else:
-                cmd = ["amixer", "sset", mixer, "5%+"]
-                message = "Volume increased by 5%"
+                cmd = ["amixer", "sset", mixer, f"{VOLUME_STEP}%+"]
+                message = f"Volume increased by {VOLUME_STEP}%"
         elif action == "down":
-            cmd = ["amixer", "sset", mixer, "5%-"]
-            message = "Volume decreased by 5%"
+            cmd = ["amixer", "sset", mixer, f"{VOLUME_STEP}%-"]
+            message = f"Volume decreased by {VOLUME_STEP}%"
         elif action == "mute":
             # For mute, we need to check current state and toggle
             # First get current mute status
@@ -400,16 +412,16 @@ async def _volume_amixer(action: str):
                 # Cap at 100%
                 if current_vol >= 100:
                     return {"action": action, "method": "amixer", "status": "capped", "message": "Volume already at maximum (100%)", "volume": "100%"}
-                elif current_vol > 95:
+                elif current_vol > 100 - VOLUME_STEP:
                     # Set to exactly 100% if we're close
                     cmd = ["amixer", "sset", mixer, "100%"]
                     message = "Volume set to maximum (100%)"
                 else:
-                    cmd = ["amixer", "sset", mixer, "5%+"]
-                    message = "Volume increased by 5%"
+                    cmd = ["amixer", "sset", mixer, f"{VOLUME_STEP}%+"]
+                    message = f"Volume increased by {VOLUME_STEP}%"
             elif action == "down":
-                cmd = ["amixer", "sset", mixer, "5%-"]
-                message = "Volume decreased by 5%"
+                cmd = ["amixer", "sset", mixer, f"{VOLUME_STEP}%-"]
+                message = f"Volume decreased by {VOLUME_STEP}%"
             elif action == "mute":
                 # For mute with PCM, check current state and toggle
                 get_status = subprocess.run(
@@ -440,16 +452,16 @@ async def _volume_pulseaudio(action: str):
             # Cap at 100% (PulseAudio uses 65536 as 100%)
             if current_vol >= 100:
                 return {"action": action, "method": "pulseaudio", "status": "capped", "message": "Volume already at maximum (100%)", "volume": "100%"}
-            elif current_vol > 95:
+            elif current_vol > 100 - VOLUME_STEP:
                 # Set to exactly 100%
                 cmd = ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "100%"]
                 message = "Volume set to maximum (100%)"
             else:
-                cmd = ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+5%"]
-                message = "Volume increased by 5%"
+                cmd = ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"+{VOLUME_STEP}%"]
+                message = f"Volume increased by {VOLUME_STEP}%"
         elif action == "down":
-            cmd = ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"]
-            message = "Volume decreased by 5%"
+            cmd = ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"-{VOLUME_STEP}%"]
+            message = f"Volume decreased by {VOLUME_STEP}%"
         elif action == "mute":
             cmd = ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"]
             message = "Mute toggled"
@@ -476,11 +488,11 @@ async def _volume_wireplumber(action: str):
         if action == "up":
             # wpctl has a built-in limit option
             # Using --limit=1.0 caps volume at 100%
-            cmd = ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "0.05+", "--limit=1.0"]
-            message = "Volume increased by 5%"
+            cmd = ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{VOLUME_STEP / 100}+", "--limit=1.0"]
+            message = f"Volume increased by {VOLUME_STEP}%"
         elif action == "down":
-            cmd = ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "0.05-"]
-            message = "Volume decreased by 5%"
+            cmd = ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{VOLUME_STEP / 100}-"]
+            message = f"Volume decreased by {VOLUME_STEP}%"
         elif action == "mute":
             cmd = ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]
             message = "Mute toggled"

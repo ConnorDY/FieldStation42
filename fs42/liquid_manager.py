@@ -61,12 +61,11 @@ class LiquidManager(object):
                 LiquidAPI.delete_blocks(station_config)
         self.reload_schedules()
 
-    def reset_schedule(self, station_config, force=False):
+    def reset_schedule(self, station_config):
         
         if station_config["_has_schedule"]:
             logging.getLogger("liquid").info(f"Deleting schedules for {station_config['network_name']}")
-            if not force:
-               self.reset_sequences(station_config)
+            self.reset_sequences(station_config)
             LiquidAPI.delete_blocks(station_config)
         self.reload_schedules()
 
@@ -78,6 +77,7 @@ class LiquidManager(object):
         _blocks: list[LiquidBlock] = self.schedules.get(station_config["network_name"], [])
 
         now = datetime.datetime.now()
+        today = datetime.datetime(now.year, now.month, now.day)
         _reaped = {}
 
         # make a sequence cache index
@@ -90,7 +90,7 @@ class LiquidManager(object):
 
         for _block in _blocks:
             # are we to now yet?
-            if _block.start_time > now:
+            if _block.start_time >= today:
                 # does it have a sequence and is that sequence in the catalog?
 
                 if _block.sequence_key:
@@ -107,7 +107,6 @@ class LiquidManager(object):
                     if seq and skey not in _reaped:
                         # register that we found it
                         _reaped[skey] = _block
-
                         SequenceAPI.reset_by_episode_path(
                             station_config,
                             _block.sequence_key["sequence_name"],

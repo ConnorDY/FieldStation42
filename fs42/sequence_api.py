@@ -216,6 +216,20 @@ class SequenceAPI:
                     if isinstance(slot, dict):
                         yield slot
 
+        # scan week_overrides slots
+        week_overrides = station_config.get("week_overrides", {})
+        if isinstance(week_overrides, dict):
+            for week_schedule in week_overrides.values():
+                for day_key in DAYS:
+                    if day_key not in week_schedule:
+                        continue
+                    slots = week_schedule[day_key]
+                    if not isinstance(slots, dict):
+                        continue
+                    for slot in slots.values():
+                        if isinstance(slot, dict):
+                            yield slot
+
     @staticmethod
     def _scan_sequence_slot(station_config, slot):
         if "sequence" not in slot or "tags" not in slot:
@@ -511,11 +525,21 @@ class SequenceAPI:
     def _find_show_dirs(base_dir):
         show_dirs = []
 
-        for root, dirs, files in os.walk(base_dir):
+        for root, dirs, files in os.walk(base_dir, followlinks=True):
+            # follow symlinks and skip dotfiles to stay in sync with _rfind_media
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
 
-            media = MediaProcessor._rfind_media(root)
-
-            if not media:
+            has_media = any(
+                not f.startswith(".")
+                and f.lower().endswith(
+                    tuple(
+                        f".{ext}"
+                        for ext in MediaProcessor.VIDEO_FORMATS
+                    )
+                )
+                for f in files
+            )
+            if not has_media:
                 continue
 
             rel = os.path.relpath(root, base_dir)
