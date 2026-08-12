@@ -46,10 +46,10 @@
   --grid-header-bg: #0000cd;
   --grid-channel-bg: #00008b;
   --grid-channel-width: 5.25em;
-  --grid-row-height: 3.6em;
+  --grid-row-height: 3.3em;
   --channel-name-font-size: 0.6em;
   --channel-column-align: flex-start;
-  --channel-padding-top: 0.2em;
+  --channel-padding-top: 0.35em;
   --channel-names-wrap: true;
   --channel-text-padding: 1.05;
   --grid-row-odd-bg: #00008b;
