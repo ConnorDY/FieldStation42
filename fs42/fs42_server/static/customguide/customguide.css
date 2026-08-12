@@ -305,7 +305,10 @@ body {
     else: nowrap
     );
   text-overflow: ellipsis;
-  font-size: 0.78em;
+  font-size: if(
+    style(--channel-name-font-size: null): 0.78em;
+    else: var(--channel-name-font-size)
+    );
   text-align: center;
   width: 100%;
 }
