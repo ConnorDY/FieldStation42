@@ -274,7 +274,7 @@ body {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: var(--channel-column-align, center);
   align-items: center;
   padding: 0 0.4em;
   margin: var(--channel-pill-margin-v, 0) var(--channel-pill-margin-h, 0);
@@ -290,13 +290,13 @@ body {
   color: var(--channel-number-color);
   font-weight: bold;
   text-align: center;
-  padding-top: var(--channel-padding-top);
+  padding-top: var(--channel-padding-top, 0);
 }
 
 .grid-channel .channel-name {
   if(style(--channel-names-wrap: true): overflow-wrap: break-word;)
-  line-height: var(--channel-text-padding);
-  padding-bottom: var(--channel-padding-bottom);
+  line-height: var(--channel-text-padding, normal);
+  padding-bottom: var(--channel-padding-bottom, 0);
   font-family: var(--channel-name-font), var(--font-family);
   color: var(--channel-name-color);
   overflow: hidden;
